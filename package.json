@@ -1,6 +1,7 @@
 {
   "name": "anti-copilot",
   "displayName": "anti-copilot",
+  "publisher": "anticopilot",
   "description": "An extension to focus on skill growth instead of just getting the job done.",
   "version": "0.0.1",
   "engines": {

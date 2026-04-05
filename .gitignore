@@ -6,6 +6,4 @@ node_modules
 
 src/mock-*.html
 
-*.md
-!README.md
 .env

@@ -11,41 +11,29 @@
     "Other"
   ],
   "activationEvents": [
-    "*"
+    "onUri"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "anti-copilot.printDiagnostics",
-        "title": "anti-copilot: Print Diagnostics"
+        "command": "anti-copilot.reportStruggle",
+        "title": "AntiCopilot: I'm Stuck (Report Struggle)"
       },
       {
         "command": "anti-copilot.highlightDiagnostics",
-        "title": "anti-copilot: Highlight Diagnostics"
+        "title": "AntiCopilot: Highlight Diagnostics"
       },
       {
         "command": "anti-copilot.openSidebar",
-        "title": "anti-copilot: Open Sidebar (Webview View)"
-      },
-      {
-        "command": "anti-copilot.openEditor",
-        "title": "anti-copilot: Open Editor (Webview Panel)"
-      },
-      {
-        "command": "anti-copilot.increment",
-        "title": "anti-copilot: Increment"
-      },
-      {
-        "command": "anti-copilot.testFetch",
-        "title": "anti-copilot: Test Fetch API"
+        "title": "AntiCopilot: Open Sidebar (Webview View)"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "sidebar-webview",
-          "title": "owo",
+          "title": "AntiCopilot",
           "icon": "resources/sushi.svg"
         }
       ]

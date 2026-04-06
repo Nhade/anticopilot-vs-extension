@@ -1,71 +1,60 @@
-# anti-copilot README
+# AntiCopilot VS Code Extension
 
-This is the README for your extension "anti-copilot". After writing up a brief description, we recommend including the following sections.
+The sensor layer for the AntiCopilot adaptive learning system. It captures real-world coding struggles, delivers inline AI hints, and manages your FSRS-powered review queue directly within the editor.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- **Struggle reporting** — captures code context plus active diagnostics, sends them to the backend, and displays an AI-generated hint in the sidebar.
+- **Sidebar panel** — manage active learning tasks, spaced repetition reviews, and on-demand practice tasks.
+- **Deep-link integration** — supports `vscode://` URIs to sync state instantly with the web dashboard.
 
-For example if there is an image subfolder under your extension project workspace:
+## Project Structure
 
-\!\[feature X\]\(images/feature-x.png\)
-
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+```
+src/
+├── extension.ts          # Entry point — activate/deactivate lifecycle only
+├── commands/
+│   ├── reportStruggle.ts # "I'm Stuck" command: captures context & calls backend
+│   └── diagnostics.ts    # Highlight diagnostics decoration command
+├── providers/
+│   └── SidebarProvider.ts # Source of truth for active task; manages Webview state
+├── views/
+│   ├── sidebarHtml.ts    # HTML template for the sidebar Webview
+│   └── panelHtml.ts      # HTML template for panel views
+└── api/
+    └── client.ts         # Fetch wrappers for the anticopilot-agent backend (port 8000)
+```
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- VS Code `^1.109.0`
+- Node.js
+- The agent backend running on `http://localhost:8000` (required at runtime for hints, reviews, and roadmap data)
+
+## How to Run
+
+### Install
+
+```bash
+npm install
+```
+
+### Development (with watch mode)
+
+```bash
+npm install
+npm run watch        # Rebuilds on every file save (TypeScript + esbuild)
+```
+
+Then press **F5** in VS Code to launch the Extension Development Host.
+
+### Distribute
+
+```bash
+npm run package      # Generates .vsix
+```
 
 ## Extension Settings
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+> [!NOTE]
+> The backend URL is currently hardcoded to http://localhost:8000. No additional configuration is required.

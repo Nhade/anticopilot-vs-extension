@@ -53,7 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
             });
             
             if (skillpath) {
-              provider.updateActiveTask(skillpath);
+              provider.updateActiveTask(skillpath, roadmapId, data);
               vscode.commands.executeCommand("anti-copilot.sidebar.focus");
             } else {
               vscode.window.showErrorMessage(`Task "${taskId}" not found in roadmap "${roadmapId}".`);

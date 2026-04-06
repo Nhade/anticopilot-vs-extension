@@ -71,10 +71,10 @@ export function registerReportStruggleCommand(provider: SidebarViewProvider) {
             throw new Error(`HTTP Error ${response.status}`);
           }
 
-          const responseData = await response.json() as { hint: string };
-          
+          const responseData = await response.json() as { hint: string; concept_name?: string };
+
           // Display the hint using the sidebar provider
-          provider.showHintNotif(responseData.hint);
+          provider.showHintNotif(responseData.hint, responseData.concept_name);
 
         } catch (error: any) {
           vscode.window.showErrorMessage(`Failed to get help: ${error.message}`);

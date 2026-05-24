@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { SidebarViewProvider } from '../providers/SidebarProvider';
+import { reportStruggle } from '../api/client';
 
 export function registerReportStruggleCommand(provider: SidebarViewProvider) {
   return vscode.commands.registerCommand("anti-copilot.reportStruggle", async () => {
@@ -36,17 +37,20 @@ export function registerReportStruggleCommand(provider: SidebarViewProvider) {
       ? relevantDiagnostics.map(d => `[Line ${d.range.start.line + 1}] ${d.message}`).join("\n")
       : "No syntax errors. User might be stuck on logic.";
 
-    // Retrieve active task information from the provider
+    // Require a real active skillpath — otherwise we'd create low-quality
+    // review cards pointing at "unknown-task".
     const activeTask = provider.getActiveTask();
-    const roadmapId = activeTask?.roadmap_id || "unknown-roadmap";
-    const milestoneId = activeTask?.milestone_id || "unknown-milestone";
-    const skillpathId = activeTask?.skillpath_id || "unknown-task";
+    if (!activeTask?.roadmap_id || !activeTask?.milestone_id || !activeTask?.skillpath_id) {
+      vscode.window.showErrorMessage(
+        "Open a task from the AntiCopilot dashboard before reporting a struggle — we need to know which skillpath you're working on."
+      );
+      return;
+    }
 
-    // Build the payload
     const payload = {
-      roadmap_id: roadmapId,
-      milestone_id: milestoneId,
-      skillpath_id: skillpathId,
+      roadmap_id: activeTask.roadmap_id,
+      milestone_id: activeTask.milestone_id,
+      skillpath_id: activeTask.skillpath_id,
       code_context: contextCode,
       language: document.languageId,
       diagnostic_message: diagnosticMessage
@@ -60,18 +64,7 @@ export function registerReportStruggleCommand(provider: SidebarViewProvider) {
       },
       async (progress) => {
         try {
-          // Send to the backend
-          const response = await fetch("http://localhost:8000/v1/signals/struggle", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP Error ${response.status}`);
-          }
-
-          const responseData = await response.json() as { hint: string; concept_name?: string };
+          const responseData = await reportStruggle(payload);
 
           // Display the hint using the sidebar provider
           provider.showHintNotif(responseData.hint, responseData.concept_name);

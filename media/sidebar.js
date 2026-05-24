@@ -25,6 +25,14 @@
   let roadmapFetched = false;
   let roadmapError = null;
   let expandedMilestones = new Set();
+  let generatingSkillpaths = new Set();
+  let roadmapGenerateErrors = {}; // skillpathId -> error message
+
+  // Task-tab generation state
+  let contentGenerating = false;
+  let contentError = null;
+  // UI state for the task tab: incremental hint reveal per coding problem
+  let hintsRevealed = {}; // contentId -> count of hints revealed so far
 
   // ── Tab switching ──────────────────────────────────────────────────────
   document.querySelectorAll('.tab-btn').forEach(function (btn) {
@@ -52,6 +60,17 @@
     } else {
       renderCurrentPanel();
     }
+    // When the user opens the Task tab and the active task has no learning
+    // content cached, ask the provider to refetch the roadmap. The web side
+    // may have just generated content for this skillpath; without this we
+    // keep showing the empty Generate panel until the user manually retries.
+    if (
+      tab === 'task' &&
+      activeTask &&
+      (!Array.isArray(activeTask.learning_contents) || activeTask.learning_contents.length === 0)
+    ) {
+      vscode.postMessage({ command: 'refreshActiveTask' });
+    }
   }
 
   function renderCurrentPanel() {
@@ -70,6 +89,9 @@
     switch (msg.command) {
       case 'updateTask':
         activeTask = msg.task;
+        contentGenerating = false;
+        contentError = null;
+        hintsRevealed = {};
         if (msg.roadmapId && msg.roadmapId !== activeRoadmapId) {
           activeRoadmapId = msg.roadmapId;
           roadmap = null;
@@ -77,6 +99,24 @@
           roadmapFetched = false;
         }
         renderTaskTab();
+        break;
+      case 'skillpathContentResult':
+        contentGenerating = false;
+        contentError = msg.success ? null : msg.error || 'Failed to generate content.';
+        if (msg.skillpathId && generatingSkillpaths.has(msg.skillpathId)) {
+          generatingSkillpaths.delete(msg.skillpathId);
+          if (!msg.success) {
+            roadmapGenerateErrors[msg.skillpathId] = msg.error || 'Failed to generate content.';
+          } else {
+            delete roadmapGenerateErrors[msg.skillpathId];
+          }
+          if (currentTab === 'roadmap') {
+            renderRoadmapTab();
+          }
+        }
+        if (currentTab === 'task') {
+          renderTaskTab();
+        }
         break;
       case 'switchTab':
         switchTab(msg.tab);
@@ -143,43 +183,188 @@
       ].join('');
       return;
     }
-    var objectives = activeTask.learning_objectives || [];
-    var objHtml =
-      objectives.length > 0
-        ? objectives
-            .map(function (obj, i) {
-              return (
-                '<div class="criteria-item"><div class="checkbox' +
-                (i === 0 ? ' active' : '') +
-                '"></div><span>' +
-                escHtml(obj) +
-                '</span></div>'
-              );
-            })
-            .join('')
-        : '<div class="criteria-item"><div class="checkbox active"></div><span>Implement task requirements</span></div>';
 
-    panel.innerHTML = [
-      '<div style="display:flex;flex-direction:column;gap:16px">',
-      '  <div>',
-      '    <div class="badge badge-teal" style="margin-bottom:8px">Active Task</div>',
+    var allContents = Array.isArray(activeTask.learning_contents) ? activeTask.learning_contents : [];
+    var codingProblems = allContents.filter(function (c) {
+      return c.content_type === 'coding_problem';
+    });
+    var practiceModeHtml = activeTask.practice_mode
+      ? '<div class="badge badge-purple">Practice: ' +
+        escHtml(String(activeTask.practice_mode).replace(/_/g, ' ')) +
+        '</div>'
+      : '';
+
+    var contentHtml;
+    if (codingProblems.length > 0) {
+      contentHtml = codingProblems.map(renderCodingProblemFullPage).join('');
+    } else if (allContents.length > 0) {
+      contentHtml = [
+        '<div class="content-empty">',
+        '  <div class="content-empty-title">No coding problem yet</div>',
+        '  <div class="content-empty-sub">This task has ' + allContents.length + ' learning ' +
+          (allContents.length === 1 ? 'item' : 'items') +
+          ' (articles or quizzes). Open the dashboard to view them, or regenerate to add a coding problem.</div>',
+        contentError ? '<div class="error-banner">' + escHtml(contentError) + '</div>' : '',
+        '  <button class="practice-btn"' + (contentGenerating ? ' disabled' : '') + ' onclick="generateContent()">' +
+          escHtml(contentGenerating ? 'Generating…' : 'Regenerate Content') + '</button>',
+        '</div>',
+      ].join('');
+    } else {
+      contentHtml = renderGenerateContentPanel();
+    }
+
+    var html = [
+      '<div class="task-tab-root">',
+      '  <div class="task-tab-header">',
+      '    <div class="badge-row">',
+      '      <div class="badge badge-teal">Active Task</div>',
+             practiceModeHtml,
+      '    </div>',
       '    <h1 class="title">' + escHtml(activeTask.title) + '</h1>',
       '  </div>',
-      '  <div class="card">',
-      '    <div class="section-label">Objective</div>',
-      '    <p class="body-text">' + escHtml(activeTask.description || 'No description available.') + '</p>',
-      '  </div>',
-      '  <div class="card">',
-      '    <div class="section-label">Success Criteria</div>',
-      '    <div class="criteria-list">' + objHtml + '</div>',
-      '  </div>',
-      '  <div style="text-align:center;padding-top:4px">',
-      '    <div class="section-label" style="margin-bottom:6px">Convergence Signal</div>',
-      '    <div style="font-size:11px;color:var(--muted)">VS Code is synced with your roadmap.</div>',
-      '  </div>',
+      contentHtml,
+      '</div>',
+    ];
+
+    panel.innerHTML = html.join('');
+  }
+
+  function renderCodingProblemFullPage(problem) {
+    var difficultyClass = problem.difficulty === 'easy' ? 'badge-teal' : 'badge-orange';
+    var difficulty = problem.difficulty
+      ? '<span class="badge ' + difficultyClass + '">' + escHtml(problem.difficulty) + '</span>'
+      : '';
+    var titleRow =
+      '<div class="cp-header">' +
+      '  <div class="cp-meta-row">' +
+      '    <span class="cp-label">Problem</span>' +
+           difficulty +
+      '  </div>' +
+      '  <h2 class="cp-title">' + escHtml(problem.title || 'Coding Problem') + '</h2>' +
+      '</div>';
+    var promptBlock = problem.prompt
+      ? '<div class="task-content cp-prompt">' + renderMarkdown(problem.prompt) + '</div>'
+      : '';
+    var openBtn = problem.starter_code
+      ? '<button class="practice-btn cp-open-btn" onclick="openCodingProblem(\'' + escAttr(problem.content_id) + '\')">▶ Open Starter Code in Editor</button>'
+      : '';
+    var expected = problem.expected_output
+      ? '<div class="content-block"><div class="section-label">Expected Output</div>' +
+        '<div class="task-content cp-prompt">' + renderMarkdown(problem.expected_output) + '</div></div>'
+      : '';
+    var hintsHtml = renderHintsBlock(problem);
+    return '<div class="coding-problem-full">' + titleRow + promptBlock + openBtn + expected + hintsHtml + '</div>';
+  }
+
+  function renderHintsBlock(problem) {
+    if (!Array.isArray(problem.hints) || problem.hints.length === 0) {
+      return '';
+    }
+    var total = problem.hints.length;
+    var revealed = hintsRevealed[problem.content_id] || 0;
+    var listHtml = '';
+    if (revealed > 0) {
+      var items = problem.hints.slice(0, revealed).map(function (h, i) {
+        return '<li><span class="hint-num">Hint ' + (i + 1) + '</span> ' + escHtml(h) + '</li>';
+      }).join('');
+      listHtml = '<ol class="hints-list">' + items + '</ol>';
+    }
+    var btnLabel;
+    var btnDisabled = '';
+    if (revealed === 0) {
+      btnLabel = '💡 Reveal first hint (' + total + ' total)';
+    } else if (revealed < total) {
+      btnLabel = '💡 Reveal next hint (' + revealed + ' / ' + total + ' shown)';
+    } else {
+      btnLabel = 'All ' + total + ' hint' + (total === 1 ? '' : 's') + ' revealed';
+      btnDisabled = ' disabled';
+    }
+    return (
+      '<div class="content-block hints-block">' +
+      listHtml +
+      '<button class="hint-toggle"' + btnDisabled +
+      ' onclick="revealNextHint(\'' + escAttr(problem.content_id) + '\')">' +
+      escHtml(btnLabel) +
+      '</button>' +
+      '</div>'
+    );
+  }
+
+  function renderGenerateContentPanel() {
+    var errHtml = contentError
+      ? '<div class="error-banner">' + escHtml(contentError) + '</div>'
+      : '';
+    var btnLabel = contentGenerating ? 'Generating…' : 'Generate Learning Content';
+    var btnDisabled = contentGenerating ? ' disabled' : '';
+    return [
+      '<div class="content-empty">',
+      '  <div class="content-empty-title">No learning content yet</div>',
+      '  <div class="content-empty-sub">Generate an article, coding problem, or quiz for this skillpath.</div>',
+      errHtml,
+      '  <button class="practice-btn"' + btnDisabled + ' onclick="generateContent()">' + escHtml(btnLabel) + '</button>',
       '</div>',
     ].join('');
   }
+
+  function contentTypeLabel(type) {
+    if (type === 'article') return 'Article';
+    if (type === 'coding_problem') return 'Coding Problem';
+    if (type === 'multiple_choice') return 'Quiz';
+    return type || 'Content';
+  }
+
+  window.revealNextHint = function (contentId) {
+    if (!activeTask) {
+      return;
+    }
+    var contents = Array.isArray(activeTask.learning_contents) ? activeTask.learning_contents : [];
+    var problem = contents.find(function (c) {
+      return c.content_id === contentId && c.content_type === 'coding_problem';
+    });
+    if (!problem || !Array.isArray(problem.hints) || problem.hints.length === 0) {
+      return;
+    }
+    var current = hintsRevealed[contentId] || 0;
+    if (current >= problem.hints.length) {
+      return;
+    }
+    hintsRevealed[contentId] = current + 1;
+    renderTaskTab();
+  };
+
+  window.openCodingProblem = function (contentId) {
+    if (!activeTask) return;
+    var contents = Array.isArray(activeTask.learning_contents) ? activeTask.learning_contents : [];
+    var problem = contents.find(function (c) {
+      return c.content_id === contentId && c.content_type === 'coding_problem';
+    });
+    if (!problem || !problem.starter_code) return;
+    vscode.postMessage({
+      command: 'openCodingProblem',
+      contentId: contentId,
+      starterCode: problem.starter_code,
+      title: problem.title || activeTask.title,
+    });
+  };
+
+  window.generateContent = function () {
+    if (!activeTask || !activeTask.skillpath_id) return;
+    var roadmapId = activeTask.roadmap_id || activeRoadmapId;
+    if (!roadmapId) {
+      contentError = 'No roadmap is loaded. Open this task from the dashboard first.';
+      renderTaskTab();
+      return;
+    }
+    contentGenerating = true;
+    contentError = null;
+    renderTaskTab();
+    vscode.postMessage({
+      command: 'generateSkillpathContent',
+      roadmapId: roadmapId,
+      skillpathId: activeTask.skillpath_id,
+      force: !activeTask.need_generation,
+    });
+  };
 
   // ── Reviews Tab ────────────────────────────────────────────────────────
   function renderReviewsTab() {
@@ -229,24 +414,24 @@
     // Review list
     var items = reviews
       .map(function (r, _idx) {
-        var meta = r.concept_metadata || {};
-        var name = meta.concept_name || 'Unknown Concept';
-        var lang = meta.language && meta.language !== 'unknown' ? meta.language : null;
+        var info = reviewDisplayInfo(r);
         var stateLabel = ['New', 'Learning', 'Review', 'Relearning'][r.state] || 'Learning';
         var stateClass = r.state === 2 ? 'badge-orange' : 'badge-teal';
         var dueText = formatDue(r.due);
         return [
           '<div class="review-card">',
           '  <div class="review-card-header">',
-          '    <div class="review-concept-name">' + escHtml(name) + '</div>',
+          '    <span class="badge badge-muted" style="margin-bottom:4px">' + escHtml(info.sourceLabel) + '</span>',
+          '    <div class="review-concept-name">' + escHtml(info.label) + '</div>',
+          info.subtitle ? '    <div class="review-subtitle">' + escHtml(info.subtitle) + '</div>' : '',
           '  </div>',
           '  <div class="review-meta">',
-          lang ? '    <span class="badge badge-muted">' + escHtml(lang) + '</span>' : '',
+          info.language ? '    <span class="badge badge-muted">' + escHtml(info.language) + '</span>' : '',
           '    <span class="badge ' + stateClass + '">' + stateLabel + '</span>',
           '    <span style="font-size:11px;color:var(--muted)">' + dueText + '</span>',
           '  </div>',
-          meta.misconception ? '  <div class="review-misconception">' + escHtml(meta.misconception) + '</div>' : '',
-          '  <button class="practice-btn" onclick="startPractice(\'' + r.concept_id + '\')">Practice</button>',
+          info.misconception ? '  <div class="review-misconception">' + escHtml(info.misconception) + '</div>' : '',
+          '  <button class="practice-btn" onclick="startPractice(\'' + escAttr(r.concept_id) + '\')">Practice</button>',
           '</div>',
         ].join('');
       })
@@ -255,12 +440,30 @@
     panel.innerHTML = '<div id="review-list-check" class="review-list">' + items + '</div>';
   }
 
+  function reviewDisplayInfo(r) {
+    var meta = r.concept_metadata || {};
+    if (r.source_type === 'skill_path') {
+      return {
+        label: meta.title || 'Skill Path Review',
+        sourceLabel: contentTypeLabel(meta.content_type) || 'Skill Path',
+        subtitle: meta.description || null,
+      };
+    }
+    return {
+      label: meta.concept_name || meta.concept || 'Programming Concept',
+      sourceLabel: 'Weakness',
+      subtitle: null,
+      language: meta.language && meta.language !== 'unknown' ? meta.language : null,
+      misconception: meta.misconception || null,
+    };
+  }
+
   function renderPracticeView(panel) {
     if (practiceLoading) {
       panel.innerHTML = [
         '<div class="practice-header">',
         '  <button class="back-btn" onclick="backToList()">← Back</button>',
-        '  <span class="practice-concept-name">' + escHtml((activeConcept.concept_metadata || {}).concept_name || '') + '</span>',
+        '  <span class="practice-concept-name">' + escHtml(reviewDisplayInfo(activeConcept).label) + '</span>',
         '</div>',
         '<div class="loading-state"><div class="spinner"></div><span>Generating task...</span></div>',
       ].join('');
@@ -291,7 +494,7 @@
     panel.innerHTML = [
       '<div class="practice-header">',
       '  <button class="back-btn" onclick="backToList()">← Back</button>',
-      '  <span class="practice-concept-name">' + escHtml((activeConcept.concept_metadata || {}).concept_name || '') + '</span>',
+      '  <span class="practice-concept-name">' + escHtml(reviewDisplayInfo(activeConcept).label) + '</span>',
       '</div>',
       '<div class="section-label" style="margin-bottom:8px">Task</div>',
       '<div class="task-content">' + renderMarkdown(practiceTask.content) + '</div>',
@@ -387,8 +590,8 @@
     }
 
     var milestones = roadmap.milestones || [];
-    var skillpaths = roadmap.skillpaths || [];
-    var roadmapInfo = roadmap.roadmap || {};
+    var skillpaths = flattenRoadmapSkillpaths(roadmap);
+    var roadmapInfo = roadmap.roadmap || roadmap;
 
     if (milestones.length === 0) {
       panel.innerHTML = [
@@ -420,14 +623,31 @@
         .map(function (sp) {
           var isActive = sp.skillpath_id === activeTaskId;
           var hours = sp.estimated_hours ? sp.estimated_hours + 'h' : '';
+          var hasCp = hasCodingProblem(sp);
+          var hoursHtml = hours ? '<span class="skillpath-hours">' + hours + '</span>' : '';
+          if (hasCp) {
+            return [
+              '<div class="skillpath-item' + (isActive ? ' active-task' : '') +
+                '" onclick="selectTask(\'' + escAttr(sp.skillpath_id) + '\')">',
+              '  <span class="skillpath-title">' + escHtml(sp.title) + '</span>',
+              hoursHtml,
+              '</div>',
+            ].join('');
+          }
+          var isGenerating = generatingSkillpaths.has(sp.skillpath_id);
+          var hasContent = Array.isArray(sp.learning_contents) && sp.learning_contents.length > 0;
+          var btnLabel = isGenerating ? 'Generating…' : (hasContent ? 'Regenerate' : 'Generate');
+          var btnDisabled = isGenerating ? ' disabled' : '';
+          var spErr = roadmapGenerateErrors[sp.skillpath_id];
+          var errHtml = spErr ? '<div class="skillpath-error">' + escHtml(spErr) + '</div>' : '';
           return [
-            '<div class="skillpath-item' +
-              (isActive ? ' active-task' : '') +
-              '" onclick="selectTask(\'' +
-              sp.skillpath_id +
-              '\')">',
+            '<div class="skillpath-item skillpath-disabled" title="No coding problem yet — generate to unlock">',
             '  <span class="skillpath-title">' + escHtml(sp.title) + '</span>',
-            hours ? '  <span class="skillpath-hours">' + hours + '</span>' : '',
+            hoursHtml,
+            '  <button class="generate-btn"' + btnDisabled +
+              ' onclick="generateForSkillpath(event, \'' + escAttr(sp.skillpath_id) + '\')">' +
+              escHtml(btnLabel) + '</button>',
+            errHtml,
             '</div>',
           ].join('');
         })
@@ -459,12 +679,52 @@
   }
 
   window.selectTask = function (skillpathId) {
-    var sp = (roadmap && roadmap.skillpaths || []).find(function (s) {
+    var sp = flattenRoadmapSkillpaths(roadmap).find(function (s) {
       return s.skillpath_id === skillpathId;
     });
-    if (sp) {
+    if (sp && hasCodingProblem(sp)) {
       vscode.postMessage({ command: 'setActiveTask', task: sp });
     }
+  }
+
+  window.generateForSkillpath = function (event, skillpathId) {
+    if (event && event.stopPropagation) {
+      event.stopPropagation();
+    }
+    if (!roadmap || !skillpathId) {
+      return;
+    }
+    var sp = flattenRoadmapSkillpaths(roadmap).find(function (s) {
+      return s.skillpath_id === skillpathId;
+    });
+    if (!sp) {
+      return;
+    }
+    var roadmapId = sp.roadmap_id || (roadmap.roadmap || roadmap).roadmap_id || activeRoadmapId;
+    if (!roadmapId) {
+      roadmapGenerateErrors[skillpathId] = 'No roadmap loaded.';
+      renderRoadmapTab();
+      return;
+    }
+    var hasContent = Array.isArray(sp.learning_contents) && sp.learning_contents.length > 0;
+    generatingSkillpaths.add(skillpathId);
+    delete roadmapGenerateErrors[skillpathId];
+    renderRoadmapTab();
+    vscode.postMessage({
+      command: 'generateSkillpathContent',
+      roadmapId: roadmapId,
+      skillpathId: skillpathId,
+      force: hasContent,
+    });
+  };
+
+  function hasCodingProblem(sp) {
+    if (!sp || !Array.isArray(sp.learning_contents)) {
+      return false;
+    }
+    return sp.learning_contents.some(function (c) {
+      return c && c.content_type === 'coding_problem' && c.starter_code;
+    });
   }
 
   // ── Hint Notification ──────────────────────────────────────────────────
@@ -498,6 +758,35 @@
       .replace(/"/g, '&quot;');
   }
 
+  function escAttr(str) {
+    if (str === null || str === undefined) {
+      return '';
+    }
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/'/g, '&#39;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function flattenRoadmapSkillpaths(roadmapData) {
+    if (!roadmapData) {
+      return [];
+    }
+    if (Array.isArray(roadmapData.skillpaths)) {
+      return roadmapData.skillpaths;
+    }
+    return (roadmapData.milestones || []).flatMap(function (milestone) {
+      return (milestone.skillpaths || []).map(function (skillpath) {
+        return Object.assign({}, skillpath, {
+          roadmap_id: skillpath.roadmap_id || roadmapData.roadmap_id,
+          milestone_id: skillpath.milestone_id || milestone.milestone_id,
+        });
+      });
+    });
+  }
+
   function formatDue(isoStr) {
     try {
       var due = new Date(isoStr);
@@ -524,32 +813,101 @@
     if (!text) {
       return '';
     }
-    var s = text
-      // Escape HTML first (except we want to render some tags)
+    // Escape HTML
+    var safe = text
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
-    // Code blocks
-    s = s.replace(/```[\w]*\n([\s\S]*?)```/g, function (_, code) {
-      return '<pre><code>' + code.trim() + '</code></pre>';
+
+    // Stash fenced code blocks so block-level rules don't mangle them
+    var codeBlocks = [];
+    safe = safe.replace(/```[\w]*\n?([\s\S]*?)```/g, function (_, code) {
+      var i = codeBlocks.push('<pre><code>' + code.replace(/^\n+|\n+$/g, '') + '</code></pre>') - 1;
+      return '\n\nMDCB' + i + '\n\n';
     });
-    // Inline code
-    s = s.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
-    // Bold
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    // Headers
-    s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-    s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-    s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-    // Bullets
-    s = s.replace(/^[-\*] (.+)$/gm, '<li>$1</li>');
-    s = s.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
-    // Paragraphs
-    s = s.replace(/\n\n/g, '</p><p>');
-    s = '<p>' + s + '</p>';
-    // Clean up empty paragraphs
-    s = s.replace(/<p>\s*<\/p>/g, '');
-    return s;
+
+    // Inline markdown (run before block split so it works across all blocks)
+    safe = safe.replace(/`([^`\n]+)`/g, '<code class="inline-code">$1</code>');
+    safe = safe.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+
+    // Split into blocks on blank lines
+    var blocks = safe.split(/\n\s*\n+/);
+    var html = blocks.map(function (block) {
+      block = block.replace(/^\n+|\n+$/g, '');
+      if (!block) {
+        return '';
+      }
+
+      // Header
+      var h = /^(#{1,3})\s+(.+)$/.exec(block);
+      if (h && block.indexOf('\n') === -1) {
+        var lvl = h[1].length;
+        return '<h' + lvl + '>' + h[2] + '</h' + lvl + '>';
+      }
+
+      // Single code-block placeholder is its own block
+      if (/^MDCB\d+$/.test(block)) {
+        return block;
+      }
+
+      var lines = block.split(/\n/).map(function (l) {
+        return l.replace(/^\s+|\s+$/g, '');
+      }).filter(function (l) {
+        return l;
+      });
+      if (lines.length === 0) {
+        return '';
+      }
+
+      // Group consecutive lines into runs of the same type so a block like
+      // "Leader line\n* Item 1\n* Item 2" renders as <p> + <ul>, not as one paragraph.
+      var groups = [];
+      lines.forEach(function (l) {
+        var type;
+        if (/^\d+\.\s+/.test(l)) {
+          type = 'ol';
+        } else if (/^[-*+]\s+/.test(l)) {
+          type = 'ul';
+        } else {
+          type = 'p';
+        }
+        var last = groups[groups.length - 1];
+        if (last && last.type === type) {
+          last.items.push(l);
+        } else {
+          groups.push({ type: type, items: [l] });
+        }
+      });
+
+      return groups.map(function (g) {
+        if (g.type === 'ol') {
+          var startMatch = /^(\d+)\./.exec(g.items[0]);
+          var startNum = startMatch ? parseInt(startMatch[1], 10) : 1;
+          var startAttr = startNum > 1 ? ' start="' + startNum + '"' : '';
+          return '<ol' + startAttr + '>' +
+            g.items.map(function (l) {
+              return '<li>' + l.replace(/^\d+\.\s+/, '') + '</li>';
+            }).join('') +
+            '</ol>';
+        }
+        if (g.type === 'ul') {
+          return '<ul>' +
+            g.items.map(function (l) {
+              return '<li>' + l.replace(/^[-*+]\s+/, '') + '</li>';
+            }).join('') +
+            '</ul>';
+        }
+        return '<p>' + g.items.join('<br>') + '</p>';
+      }).join('');
+    }).join('\n');
+
+    // Restore code blocks (also strip <p> wrapper if block parser wrapped a lone placeholder)
+    html = html.replace(/<p>(MDCB\d+)<\/p>/g, '$1');
+    html = html.replace(/MDCB(\d+)/g, function (_, i) {
+      return codeBlocks[parseInt(i, 10)];
+    });
+
+    return html;
   }
 
   window.retryReviews = retryReviews;

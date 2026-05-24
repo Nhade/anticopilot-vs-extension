@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { SidebarViewProvider } from "./providers/SidebarProvider";
 import { registerHighlightDiagnosticsCommand } from "./commands/diagnostics";
 import { registerReportStruggleCommand } from "./commands/reportStruggle";
+import { flattenSkillpaths, getRoadmap } from "./api/client";
 
 export function activate(context: vscode.ExtensionContext) {
   // 1. Initialize the main Sidebar Provider
@@ -34,45 +35,46 @@ export function activate(context: vscode.ExtensionContext) {
         const taskId = queryParams.get("taskId");
 
         if (roadmapId && taskId) {
-          vscode.window.showInformationMessage(`Testing task: ${taskId}`);
-          
           try {
-            const response = await fetch(`http://localhost:8000/v1/roadmaps/${roadmapId}`);
-            if (!response.ok) {
-              const errorText = await response.text();
-              throw new Error(`Backend error (${response.status}): ${errorText}`);
-            }
-            const data = (await response.json()) as any;
-            
-            // Find the specific task in the roadmap data
-            const normTaskId = taskId.trim().toLowerCase();
-            const skillpath = (data.skillpaths || []).find((s: any) => {
-              const sId = String(s.skillpath_id || "").trim().toLowerCase();
-              const sTitle = String(s.title || "").trim().toLowerCase();
-              return sId === normTaskId || sTitle === normTaskId;
-            });
-            
+            const data = await getRoadmap(roadmapId);
+            const skillpath = flattenSkillpaths(data).find(
+              (s) => s.skillpath_id === taskId
+            );
+
             if (skillpath) {
               provider.updateActiveTask(skillpath, roadmapId, data);
-              vscode.commands.executeCommand("anti-copilot.sidebar.focus");
+              await vscode.commands.executeCommand("anti-copilot.sidebar.focus");
+              // Opening from the dashboard is an explicit "let's start coding" signal,
+              // so prefill an editor with starter code when available.
+              await provider.openActiveCodingProblem();
             } else {
               vscode.window.showErrorMessage(`Task "${taskId}" not found in roadmap "${roadmapId}".`);
             }
           } catch (error: any) {
-            vscode.window.showErrorMessage(`Connection Error: ${error.message}. Is the backend running on port 8000?`);
+            vscode.window.showErrorMessage(`Connection Error: ${error.message}`);
           }
         }
       }
     }
   });
 
-  // 5. Add all disposables to context
+  // 5. Refetch the active roadmap whenever the VS Code window regains focus.
+  //    Pairs with the frontend's window-focus refetch; keeps the extension in
+  //    sync with status / content changes made elsewhere without polling.
+  const focusListener = vscode.window.onDidChangeWindowState((state) => {
+    if (state.focused) {
+      void provider.refreshActiveRoadmap();
+    }
+  });
+
+  // 6. Add all disposables to context
   context.subscriptions.push(
     sidebarRegistration,
     highlightCmd,
     reportStruggleCmd,
     buildSidebarCmd,
-    uriHandler
+    uriHandler,
+    focusListener
   );
 }
 

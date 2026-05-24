@@ -46,6 +46,21 @@
           "name": "sidebar"
         }
       ]
+    },
+    "configuration": {
+      "title": "AntiCopilot",
+      "properties": {
+        "antiCopilot.apiBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "Base URL for the AntiCopilot backend REST API."
+        },
+        "antiCopilot.userId": {
+          "type": "string",
+          "default": "default-user",
+          "description": "Development user ID sent to AntiCopilot REST endpoints until authentication is available."
+        }
+      }
     }
   },
   "scripts": {

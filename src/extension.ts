@@ -2,27 +2,71 @@ import * as vscode from "vscode";
 import { SidebarViewProvider } from "./providers/SidebarProvider";
 import { registerHighlightDiagnosticsCommand } from "./commands/diagnostics";
 import { registerReportStruggleCommand } from "./commands/reportStruggle";
+import { captureStruggle } from "./commands/captureStruggle";
 import { flattenSkillpaths, getRoadmap } from "./api/client";
+import { EventRecorder } from "./telemetry/EventRecorder";
+import { SidecarSessionManager } from "./sidecar/SidecarSessionManager";
 
 export function activate(context: vscode.ExtensionContext) {
   // 1. Initialize the main Sidebar Provider
   const provider = new SidebarViewProvider(context.extensionUri);
 
+  // Shadow-mode passive event recorder. Runs alongside explicit
+  // reportStruggle so we can later compare its buffer against confirmed
+  // struggle events and learn which passive signals actually matter
+  // for this learner — instead of guessing thresholds up front.
+  const eventRecorder = new EventRecorder();
+
+  // Struggle sidecar: an additive telemetry/session service that runs ALONGSIDE
+  // the existing reportStruggle → main-backend flow. It opens a session for the
+  // active task, streams passive shadow events, answers remote capture requests,
+  // and asks for completeness estimates. Everything fails soft when the sidecar
+  // is down — the core extension is never blocked by it.
+  const sidecar = new SidecarSessionManager(provider, eventRecorder, () =>
+    captureStruggle(provider, eventRecorder),
+  );
+
+  // Start (or switch) a sidecar session whenever the learner picks a task.
+  const sidecarTaskListener = provider.onDidChangeActiveTask((task) => {
+    void sidecar.startSessionForTask(task);
+  });
+
   // 2. Register WebViews
+  // retainContextWhenHidden keeps the sidebar's iframe + in-memory state alive
+  // when the user switches the primary side bar to Explorer (or another view)
+  // and back. Without it VS Code tears the webview down and rebuilds it from
+  // scratch on every return — losing fetched reviews/roadmap data and forcing
+  // network re-fetches, which is the lag that pushed the user to alt-tab to the
+  // browser instead (polluting the window_state focus-out signal).
   const sidebarRegistration = vscode.window.registerWebviewViewProvider(
     SidebarViewProvider.viewType,
-    provider
+    provider,
+    { webviewOptions: { retainContextWhenHidden: true } }
   );
 
   // 3. Register Commands
   const highlightCmd = registerHighlightDiagnosticsCommand();
-  const reportStruggleCmd = registerReportStruggleCommand(provider);
-  
+  const reportStruggleCmd = registerReportStruggleCommand(provider, eventRecorder, sidecar);
+
   // Test explicitly opening the sidebar
   const buildSidebarCmd = vscode.commands.registerCommand(
     "anti-copilot.openSidebar",
     () => {
       vscode.commands.executeCommand("anti-copilot.sidebar.focus");
+    }
+  );
+
+  // Debug aid: dump the current shadow buffer into an untitled JSON doc.
+  // Lets us inspect what the recorder captured without firing a struggle.
+  const dumpEventBufferCmd = vscode.commands.registerCommand(
+    "anti-copilot.dumpEventBuffer",
+    async () => {
+      const events = eventRecorder.snapshot();
+      const doc = await vscode.workspace.openTextDocument({
+        language: "json",
+        content: JSON.stringify({ size: events.length, events }, null, 2),
+      });
+      await vscode.window.showTextDocument(doc, { preview: false });
     }
   );
 
@@ -73,8 +117,12 @@ export function activate(context: vscode.ExtensionContext) {
     highlightCmd,
     reportStruggleCmd,
     buildSidebarCmd,
+    dumpEventBufferCmd,
     uriHandler,
-    focusListener
+    focusListener,
+    eventRecorder,
+    sidecarTaskListener,
+    sidecar
   );
 }
 

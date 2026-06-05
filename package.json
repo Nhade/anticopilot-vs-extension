@@ -27,6 +27,10 @@
       {
         "command": "anti-copilot.openSidebar",
         "title": "AntiCopilot: Open Sidebar (Webview View)"
+      },
+      {
+        "command": "anti-copilot.dumpEventBuffer",
+        "title": "AntiCopilot: Dump Shadow Event Buffer (Debug)"
       }
     ],
     "viewsContainers": {
@@ -59,6 +63,21 @@
           "type": "string",
           "default": "default-user",
           "description": "Development user ID sent to AntiCopilot REST endpoints until authentication is available."
+        },
+        "antiCopilot.sidecarBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:9100",
+          "description": "Base URL for the AntiCopilot struggle sidecar (HTTP + WebSocket) service."
+        },
+        "antiCopilot.sidecarToken": {
+          "type": "string",
+          "default": "dev-sidecar-token",
+          "description": "Shared service token sent to the struggle sidecar (Bearer header for REST, ?token= query param for WebSocket)."
+        },
+        "antiCopilot.sidecarEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Toggle the struggle sidecar integration (passive session telemetry, completeness estimates, remote capture)."
         }
       }
     }
@@ -81,6 +100,7 @@
     "@types/vscode": "^1.109.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/ws": "^8.5.12",
     "typescript-eslint": "^8.54.0",
     "eslint": "^9.39.2",
     "esbuild": "^0.27.2",
@@ -88,5 +108,8 @@
     "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }

@@ -173,6 +173,14 @@ export interface RoadmapData {
   milestones: MilestoneWithSkillPaths[];
 }
 
+export interface RecordedEventPayload {
+  ts: number;
+  kind: string;
+  file_hash?: string;
+  language_id?: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface StruggleSignalPayload {
   roadmap_id: string;
   milestone_id: string;
@@ -180,11 +188,14 @@ export interface StruggleSignalPayload {
   code_context: string;
   diagnostic_message: string;
   language: string;
+  pre_event_window?: RecordedEventPayload[];
 }
 
 export interface StruggleSignalResponse {
   hint: string;
   concept_name?: string;
+  concept_id?: string;
+  misconception?: string;
   action_required?: boolean;
 }
 

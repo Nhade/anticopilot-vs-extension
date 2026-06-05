@@ -83,6 +83,13 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
   private _activeTask?: SkillPath;
   private _activeRoadmapId?: string;
 
+  /**
+   * Fires whenever the active task is (re)set. The sidecar manager listens here
+   * to start a telemetry session for the task the learner is working on.
+   */
+  private readonly _onDidChangeActiveTask = new vscode.EventEmitter<SkillPath>();
+  public readonly onDidChangeActiveTask = this._onDidChangeActiveTask.event;
+
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
   public getActiveTask(): SkillPath | undefined {
@@ -100,6 +107,7 @@ export class SidebarViewProvider implements vscode.WebviewViewProvider {
         this._view.webview.postMessage({ command: "roadmapData", roadmap: roadmapData });
       }
     }
+    this._onDidChangeActiveTask.fire(task);
   }
 
   public async openActiveCodingProblem(): Promise<boolean> {

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<!-- Browser harness for the sidebar webview: loads the real media/sidebar.css
+     and media/sidebar.js against a mocked acquireVsCodeApi "backend" so the
+     UI can be eyeballed and clicked through outside VS Code.
+
+     Serve the extension root (e.g. `python -m http.server 4173`) and open
+     /test/webview-harness/index.html
+
+     Query params:
+       ?theme=light          light theme variables (default dark)
+       ?tab=reviews|roadmap  switch tab after load
+       ?state=submitting|result|result-correct|hint   task-tab scenarios -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AntiCopilot sidebar harness</title>
+  <style>
+    /* VS Code theme variable stubs (Dark Modern / Light Modern approximations).
+       Real VS Code injects --vscode-* on the root element, so the stubs live
+       on html (not body) — sidebar.css resolves them in :root scope. */
+    html {
+      --vscode-sideBar-background: #181818;
+      --vscode-sideBar-foreground: #cccccc;
+      --vscode-foreground: #cccccc;
+      --vscode-descriptionForeground: #9d9d9d;
+      --vscode-focusBorder: #0078d4;
+      --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+      --vscode-editor-font-family: Consolas, 'Courier New', monospace;
+      --vscode-textCodeBlock-background: #1f1f1f;
+    }
+    html.light {
+      --vscode-sideBar-background: #f8f8f8;
+      --vscode-sideBar-foreground: #3b3b3b;
+      --vscode-foreground: #3b3b3b;
+      --vscode-descriptionForeground: #717171;
+      --vscode-focusBorder: #005fb8;
+      --vscode-font-family: 'Segoe UI', system-ui, sans-serif;
+      --vscode-editor-font-family: Consolas, 'Courier New', monospace;
+      --vscode-textCodeBlock-background: #f0f0f0;
+    }
+  </style>
+  <link rel="stylesheet" href="../../media/sidebar.css">
+</head>
+<body class="vscode-dark">
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      if (params.get('theme') === 'light') {
+        document.documentElement.className = 'light';
+        document.body.className = 'vscode-light';
+      }
+    })();
+  </script>
+
+  <!-- Shell copied from src/views/sidebarHtml.ts -->
+  <div class="tab-bar" role="tablist">
+    <button class="tab-btn active" data-tab="task" role="tab" aria-selected="true">Task</button>
+    <button class="tab-btn" data-tab="reviews" role="tab" aria-selected="false">Reviews</button>
+    <button class="tab-btn" data-tab="roadmap" role="tab" aria-selected="false">Roadmap</button>
+  </div>
+  <div class="narrow-notice" role="note">
+    <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8 4 12l4 4M16 8l4 4-4 4M4 12h16"/></svg>
+    Drag the sidebar edge to widen this view
+  </div>
+  <div id="panel-task" class="panel active"></div>
+  <div id="panel-reviews" class="panel"></div>
+  <div id="panel-roadmap" class="panel"></div>
+  <div id="hint-notif" class="hint-notif" role="alert" inert>
+    <button class="hint-close" aria-label="Dismiss hint" data-action="close-hint">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M18 6L6 18M6 6l12 12"/>
+      </svg>
+    </button>
+    <div class="hint-notif-header">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 18h6M10 22h4M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5.76.76 1.23 1.52 1.41 2.5"/>
+      </svg>
+      AntiCopilot Hint
+    </div>
+    <div id="hint-body" class="hint-notif-body"></div>
+    <div id="hint-footer" class="hint-notif-footer" style="display:none"></div>
+  </div>
+
+  <script>
+    // ── Mock data ────────────────────────────────────────────────────────
+    var MOCK_PROBLEM = {
+      content_id: 'cp-1',
+      content_type: 'coding_problem',
+      title: 'Discount Eligibility Checker',
+      difficulty: 'easy',
+      prompt: 'You are building a system for an online store. Customers are eligible for a special discount if they meet **both** of the following criteria:\n\n1. Their age is 60 or greater (`>= 60`).\n2. Their total purchase amount is $100 or more (`>= 100`).\n\nWrite a Python function called `check_discount_eligibility(age, purchase_amount)` that takes two arguments:\n\n* `age`: an integer representing the customer’s age.\n* `purchase_amount`: a float representing the total amount of their purchase.\n\nThe function should print `"Eligible for discount."` if both conditions are met. Otherwise, it should print `"Not eligible for discount."`\n\n**Example Test Cases:**\n\n```python\ncheck_discount_eligibility(65, 120.50)  # Eligible for discount.\ncheck_discount_eligibility(55, 120.50)  # Not eligible for discount.\ncheck_discount_eligibility(70, 80.00)   # Not eligible for discount.\ncheck_discount_eligibility(59, 99.99)   # Not eligible for discount.\n```',
+      starter_code: 'def check_discount_eligibility(age, purchase_amount):\n    pass\n',
+      expected_output: '```\nEligible for discount.\nNot eligible for discount.\n```',
+      hints: [
+        'Remember to use the correct comparison operators (`>=`) for “greater than or equal to”.',
+        'Think about how to combine two conditions so that *both* must be true for the discount to apply.',
+        'Ensure your `print()` statements match the expected output exactly, including capitalization and punctuation.'
+      ]
+    };
+    var MOCK_TASK = {
+      skillpath_id: 'sp-1',
+      roadmap_id: 'rm-1',
+      milestone_id: 'm-1',
+      title: 'Understanding `if` and `else` Statements',
+      description: 'Branching logic fundamentals',
+      status: 'generated',
+      practice_mode: 'guided_practice',
+      learning_contents: [
+        MOCK_PROBLEM,
+        { content_id: 'art-1', content_type: 'article', title: 'Conditionals 101' },
+        { content_id: 'q-1', content_type: 'multiple_choice', title: 'Branching quiz' }
+      ]
+    };
+    var MOCK_VERDICT_PARTIAL = {
+      validation: {
+        correctness: 'partially_correct',
+        feedback_summary: 'Close! Your age check is right, but the purchase check uses > instead of >=, so a customer spending exactly $100 is wrongly rejected.',
+        test_results: [
+          { name: 'age 65, $120.50', passed: true },
+          { name: 'age 70, $80.00', passed: true },
+          { name: 'age 60, $100.00', passed: false, message: 'expected "Eligible for discount."' }
+        ]
+      },
+      correction: {
+        inferred_correctness: 'partially_correct',
+        feedback_summary: 'Close! Your age check is right, but the purchase check uses > instead of >=, so a customer spending exactly $100 is wrongly rejected.',
+        suggested_focus: ['comparison operators', 'boundary conditions']
+      }
+    };
+    var MOCK_VERDICT_CORRECT = {
+      validation: {
+        correctness: 'correct',
+        feedback_summary: 'Both conditions are combined correctly with `and`, and the boundary values (60, 100) are included. Output strings match exactly.',
+        test_results: [
+          { name: 'age 65, $120.50', passed: true },
+          { name: 'age 55, $120.50', passed: true },
+          { name: 'age 60, $100.00', passed: true }
+        ]
+      },
+      correction: {
+        inferred_correctness: 'correct',
+        feedback_summary: 'Both conditions are combined correctly with `and`, and the boundary values are included.',
+        suggested_focus: []
+      }
+    };
+    var MOCK_REVIEWS = [
+      {
+        concept_id: 'c-1',
+        source_type: 'struggle_signal',
+        state: 2,
+        due: new Date(Date.now() - 3 * 3600e3).toISOString(),
+        reps: 3,
+        lapses: 1,
+        stability: 2.1,
+        difficulty: 6.2,
+        elapsed_days: 4,
+        scheduled_days: 3,
+        retrievability: 0.38,
+        interval_previews: { again: 0.0007, hard: 0.6, good: 3, easy: 7.5 },
+        concept_metadata: {
+          concept_name: 'Comparison operator boundaries',
+          misconception: 'Uses > when >= is required, so boundary values are silently excluded.',
+          language: 'python'
+        }
+      },
+      {
+        concept_id: 'c-2',
+        source_type: 'skill_path',
+        state: 0,
+        due: new Date().toISOString(),
+        reps: 0,
+        lapses: 0,
+        stability: 0,
+        difficulty: 5,
+        elapsed_days: 0,
+        scheduled_days: 0,
+        concept_metadata: {
+          title: 'Loops: for vs while',
+          content_type: 'multiple_choice',
+          description: 'Choosing the right loop construct for known vs unknown iteration counts.'
+        }
+      }
+    ];
+    var MOCK_DRILL = {
+      task_type: 'recall',
+      content: 'Fix this check so customers spending **exactly** $100 qualify:\n\n```python\nif purchase_amount > 100:\n    print("Eligible for discount.")\n```\n\nWhich operator should replace `>`?',
+      solution: 'Use `>=` — the requirement is “$100 or more”, which includes the boundary value:\n\n```python\nif purchase_amount >= 100:\n    print("Eligible for discount.")\n```'
+    };
+    function sp(id, title, hours, status, contents) {
+      return { skillpath_id: id, milestone_id: null, title: title, estimated_hours: hours, status: status, learning_contents: contents };
+    }
+    var MOCK_ROADMAP = {
+      roadmap_id: 'rm-1',
+      title: 'Python Foundations → Backend Developer',
+      version: 1,
+      milestones: [
+        {
+          milestone_id: 'm-1', title: 'Python Fundamentals',
+          skillpaths: [
+            sp('sp-0', 'Variables and basic types', 1, 'completed', [{ content_id: 'x1', content_type: 'article' }]),
+            sp('sp-1', 'Understanding `if` and `else` statements', 2, 'generated', [MOCK_PROBLEM]),
+            sp('sp-2', 'String formatting essentials', 1, 'ready', [{ content_id: 'x2', content_type: 'article' }])
+          ]
+        },
+        {
+          milestone_id: 'm-2', title: 'Control Flow & Functions',
+          skillpaths: [
+            sp('sp-3', 'Loops: for, while, and break', 2, 'ready', []),
+            sp('sp-4', 'Writing reusable functions', 3, 'ready', [])
+          ]
+        },
+        {
+          milestone_id: 'm-3', title: 'Data Structures',
+          skillpaths: [
+            sp('sp-5', 'Lists, dicts, and sets', 3, 'ready', [])
+          ]
+        }
+      ]
+    };
+
+    // ── Mock VS Code API: replies like SidebarProvider would ────────────
+    function reply(data, delay) {
+      setTimeout(function () { window.postMessage(data, '*'); }, delay || 80);
+    }
+    window.acquireVsCodeApi = function () {
+      return {
+        postMessage: function (msg) {
+          console.log('[webview→ext]', JSON.stringify(msg).slice(0, 120));
+          switch (msg.command) {
+            case 'fetchDueReviews':
+              reply({ command: 'dueReviews', reviews: MOCK_REVIEWS }, 250);
+              break;
+            case 'generateTask':
+              reply({ command: 'practiceTask', conceptId: msg.conceptId, task: MOCK_DRILL }, 500);
+              break;
+            case 'gradeReview':
+              reply({ command: 'gradeResult', conceptId: msg.conceptId, success: true }, 350);
+              break;
+            case 'fetchRoadmap':
+              reply({ command: 'roadmapData', roadmap: MOCK_ROADMAP }, 250);
+              break;
+            case 'submitSolution':
+              reply({ command: 'submissionResult', contentId: msg.contentId, success: true, result: MOCK_VERDICT_PARTIAL }, 900);
+              break;
+            case 'requestHint':
+              reply({ command: 'showHint', hint: 'Think about what `and` requires here — which of the two conditions can be true while the customer is still ineligible?', conceptName: 'Logical operators' }, 500);
+              break;
+            case 'completeTask':
+              reply({ command: 'completeResult', success: true }, 350);
+              break;
+            case 'generateSkillpathContent':
+              reply({ command: 'skillpathContentResult', skillpathId: msg.skillpathId, success: true }, 900);
+              break;
+            case 'setActiveTask':
+              reply({ command: 'updateTask', task: msg.task, roadmapId: 'rm-1' }, 30);
+              reply({ command: 'switchTab', tab: 'task' }, 50);
+              break;
+          }
+        },
+        getState: function () { return null; },
+        setState: function () {}
+      };
+    };
+  </script>
+  <script src="../../media/sidebar.js"></script>
+  <script>
+    // ── Scenario driver ──────────────────────────────────────────────────
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var state = params.get('state');
+      window.postMessage({ command: 'updateTask', task: MOCK_TASK, roadmapId: 'rm-1' }, '*');
+      if (params.get('tab')) {
+        setTimeout(function () {
+          window.postMessage({ command: 'switchTab', tab: params.get('tab') }, '*');
+        }, 60);
+      }
+      if (state === 'submitting') {
+        setTimeout(function () {
+          window.postMessage({ command: 'submissionPending', contentId: 'cp-1' }, '*');
+        }, 120);
+      } else if (state === 'result' || state === 'result-correct') {
+        setTimeout(function () {
+          window.postMessage({
+            command: 'submissionResult', contentId: 'cp-1', success: true,
+            result: state === 'result' ? MOCK_VERDICT_PARTIAL : MOCK_VERDICT_CORRECT
+          }, '*');
+        }, 120);
+      } else if (state === 'hint') {
+        setTimeout(function () {
+          window.postMessage({ command: 'showHint', hint: 'Think about what `and` requires here — which of the two conditions can be true while the customer is still ineligible?', conceptName: 'Logical operators' }, '*');
+        }, 120);
+      }
+    })();
+  </script>
+</body>
+</html>

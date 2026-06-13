@@ -1,6 +1,6 @@
 {
   "name": "anti-copilot",
-  "displayName": "anti-copilot",
+  "displayName": "AntiCopilot",
   "publisher": "anticopilot",
   "description": "An extension to focus on skill growth instead of just getting the job done.",
   "version": "0.0.1",
@@ -17,8 +17,12 @@
   "contributes": {
     "commands": [
       {
-        "command": "anti-copilot.reportStruggle",
-        "title": "AntiCopilot: I'm Stuck (Report Struggle)"
+        "command": "anti-copilot.requestHint",
+        "title": "AntiCopilot: I'm Stuck — Get a Hint"
+      },
+      {
+        "command": "anti-copilot.submitSolution",
+        "title": "AntiCopilot: Submit Solution"
       },
       {
         "command": "anti-copilot.highlightDiagnostics",
@@ -26,7 +30,15 @@
       },
       {
         "command": "anti-copilot.openSidebar",
-        "title": "AntiCopilot: Open Sidebar (Webview View)"
+        "title": "AntiCopilot: Open Sidebar"
+      },
+      {
+        "command": "anti-copilot.dumpEventBuffer",
+        "title": "AntiCopilot: Dump Shadow Event Buffer (Debug)"
+      },
+      {
+        "command": "anti-copilot.endSession",
+        "title": "AntiCopilot: End Coding Session"
       }
     ],
     "viewsContainers": {
@@ -43,7 +55,7 @@
         {
           "type": "webview",
           "id": "anti-copilot.sidebar",
-          "name": "sidebar"
+          "name": "AntiCopilot"
         }
       ]
     },
@@ -59,6 +71,26 @@
           "type": "string",
           "default": "default-user",
           "description": "Development user ID sent to AntiCopilot REST endpoints until authentication is available."
+        },
+        "antiCopilot.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Optional bearer token for the AntiCopilot backend API (must match the backend's BACKEND_API_TOKEN). Leave blank if the backend runs without auth."
+        },
+        "antiCopilot.sidecarBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:9100",
+          "description": "Base URL for the AntiCopilot struggle sidecar (HTTP + WebSocket) service."
+        },
+        "antiCopilot.sidecarToken": {
+          "type": "string",
+          "default": "dev-sidecar-token",
+          "description": "Shared service token sent to the struggle sidecar (Bearer header for REST, ?token= query param for WebSocket)."
+        },
+        "antiCopilot.sidecarEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Toggle the struggle sidecar integration (passive session telemetry, completeness estimates, remote capture)."
         }
       }
     }
@@ -81,6 +113,7 @@
     "@types/vscode": "^1.109.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/ws": "^8.5.12",
     "typescript-eslint": "^8.54.0",
     "eslint": "^9.39.2",
     "esbuild": "^0.27.2",
@@ -88,5 +121,8 @@
     "typescript": "^5.9.3",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   }
 }

@@ -7,3 +7,7 @@ node_modules
 src/mock-*.html
 
 .env
+
+# Shadow-logger event dumps (test recordings — keep out of VCS; can be large)
+scripts/recordings/
+*.eventlog.json

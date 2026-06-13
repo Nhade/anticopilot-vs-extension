@@ -11,7 +11,8 @@ import { createHash } from "crypto";
  * without exposing its location on disk.
  *
  * The buffer is local until something explicitly snapshots it (typically
- * reportStruggle, or the dump command). It is not transmitted otherwise.
+ * the struggle capture behind the I'm-Stuck hint, or the dump command). It
+ * is not transmitted otherwise.
  *
  * The capacity and the per-editor selection-coalesce window are sampling
  * decisions (memory + event-firehose bounds), NOT interpretation thresholds.

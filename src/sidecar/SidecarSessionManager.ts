@@ -30,7 +30,7 @@ const DEFAULT_COMPLETENESS_IDLE_MS = 45000;
  *  - a completeness debounce that asks the sidecar to grade the current code
  *
  * Sidecar integration is purely additive: it runs ALONGSIDE the existing
- * reportStruggle → main-backend flow, never replacing it.
+ * struggle-capture → main-backend flow, never replacing it.
  */
 export class SidecarSessionManager implements vscode.Disposable {
   private sessionId?: string;
@@ -186,6 +186,24 @@ export class SidecarSessionManager implements vscode.Disposable {
 
     this.connectWs();
     this.startFlushLoop();
+  }
+
+  /** Whether a live session is currently running (drives the End command's UX). */
+  public isSessionActive(): boolean {
+    return this.sessionActive;
+  }
+
+  /**
+   * End the live session only if it belongs to the given task. Used by the
+   * completion flow: the live app shows a single task per session, so marking
+   * the task complete is the session's natural end — but if the session
+   * already moved on to a different task (mid-flight task switch), it must
+   * be left alone.
+   */
+  public async endSessionForTask(skillpathId: string): Promise<void> {
+    if (this.sessionActive && this.sessionTaskId === skillpathId) {
+      await this.endCurrentSession();
+    }
   }
 
   public async endCurrentSession(): Promise<void> {

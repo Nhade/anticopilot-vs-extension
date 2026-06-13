@@ -65,7 +65,7 @@ export async function captureStruggle(
   if (!activeTask?.roadmap_id || !activeTask?.milestone_id || !activeTask?.skillpath_id) {
     return {
       ok: false,
-      reason: "Open a task from the AntiCopilot dashboard before reporting a struggle — we need to know which skillpath you're working on.",
+      reason: "Open a task from the AntiCopilot dashboard before reporting a struggle — we need to know which task you're working on.",
     };
   }
 

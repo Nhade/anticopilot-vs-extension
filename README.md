@@ -14,13 +14,13 @@ The sensor layer for the AntiCopilot adaptive learning system. It captures real-
 src/
 ├── extension.ts          # Entry point — activate/deactivate lifecycle only
 ├── commands/
-│   ├── reportStruggle.ts # "I'm Stuck" command: captures context & calls backend
+│   ├── requestHint.ts    # "I'm Stuck — Get a Hint": memory hint + struggle report
+│   ├── captureStruggle.ts # Shared struggle-capture core (command + sidecar remote)
 │   └── diagnostics.ts    # Highlight diagnostics decoration command
 ├── providers/
 │   └── SidebarProvider.ts # Source of truth for active task; manages Webview state
 ├── views/
-│   ├── sidebarHtml.ts    # HTML template for the sidebar Webview
-│   └── panelHtml.ts      # HTML template for panel views
+│   └── sidebarHtml.ts    # HTML template for the sidebar Webview
 └── api/
     └── client.ts         # Fetch wrappers for the anticopilot-agent backend (port 8000)
 ```
